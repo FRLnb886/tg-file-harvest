@@ -55,7 +55,9 @@ jobs:
           git add web/data/manifest.json
           if git diff --cached --quiet; then
             echo "manifest 无变化，跳过提交"
-          else
-            git commit -m "chore: update manifest"
-            git push
+            exit 0
           fi
+          git commit -m "chore: update manifest"
+          # 采集期间 state 可能已通过 Contents API 提交，先把远端变更 rebase 上来
+          git pull --rebase --autostash origin main
+          git push
