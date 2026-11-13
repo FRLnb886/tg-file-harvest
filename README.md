@@ -62,7 +62,7 @@ python -m panel            # 默认 http://127.0.0.1:8787
 
 > 本目录就是仓库根目录：`.github/workflows/` 必须直接在仓库根下，否则 GitHub 不会注册这些工作流。
 
-1. 本地 `pip install -r collector/requirements.txt`，`python scripts/login.py` 生成 session。
+1. 本地 `pip install -r collector/requirements.txt`，`python scripts/login.py` 生成 session。登录成功后三项凭据会写进项目根 `.env`（`collector` 和 `scripts` 启动时自动读取，已存在的环境变量优先，所以 Actions 里的 Secrets 不会被覆盖）。
 2. 仓库 Secrets 配置：`TG_API_ID`、`TG_API_HASH`、`TG_SESSION_STRING`、`R2_ACCOUNT_ID`、`R2_ACCESS_KEY_ID`、`R2_SECRET_ACCESS_KEY`、`R2_BUCKET`、`R2_PUBLIC_BASE`，通知可选 `BOT_TOKEN`、`BOT_CHAT_ID`。
 3. 填 `config/channels.yaml`（频道 username 或数字 id），需要时改 `config/settings.yaml`。
 4. 设置 → Pages → Source 选 GitHub Actions。

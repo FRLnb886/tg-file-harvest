@@ -1,10 +1,9 @@
 channels:
-  - id: "some_channel"          # 频道 username（不带 @）或数字 id
-    title: "示例频道"
+  - id: "LinYuKernel1"          # 频道 username（不带 @）或数字 id
+    title: "林羽の小窝（无广）"
     enabled: true
     min_size: 1024
     max_size: 524288000
-    include_ext: ["zip", "rar", "7z", "pdf", "apk", "epub"]
     # 只采集文件名/描述命中其中任一关键词的文件；留空表示不过滤
-    include_keywords: []
-    exclude_keywords: ["广告", "推广"]
+    include_keywords: ["LinYuKernel.ver"]
+    exclude_keywords: []

@@ -22,6 +22,22 @@ class ConfigError(ValueError):
     pass
 
 
+def _load_dotenv(path: Path) -> None:
+    """读取项目根目录的 .env；已存在的环境变量优先（Actions 里用 Secrets）。"""
+    if not path.exists():
+        return
+    for line in path.read_text("utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key, value = key.strip(), value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        if key and value:
+            os.environ.setdefault(key, value)
+
+
 def _read_yaml(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {}
@@ -169,6 +185,7 @@ def load(
     require_public_url: bool = False,
 ) -> Settings:
     base = Path(config_dir)
+    _load_dotenv(base.parent / ".env")
     raw = _read_yaml(base / "settings.yaml")
     raw_channels = _read_yaml(base / "channels.yaml")
 
