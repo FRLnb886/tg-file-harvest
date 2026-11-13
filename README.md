@@ -59,6 +59,7 @@ cron → collect.yml → collector/main.py
 - `github_prune_assets: true` 时每次上传前清掉旧资产，Release 里只留最新文件
 - 状态文件走 Contents API 存到仓库的 `state/state.json`，内容没变不会产生新提交
 - 不需要配置任何新密钥：workflow 已注入 `GITHUB_TOKEN` 与 `GITHUB_REPOSITORY`
+- **想拿「永远最新」的地址**：读 `https://<owner>.github.io/<repo>/data/manifest.json`，`items[0].url` 就是当前最新文件的直链（静态请求，比轮询 Telegram 便宜得多）
 
 切到 R2 只需要：填好 4 个 R2 凭据 + `R2_PUBLIC_BASE`，然后把 `backend` 改成 `r2`（或用环境变量 `STORAGE_BACKEND=r2` 覆盖）。
 
