@@ -18,6 +18,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
@@ -61,3 +63,21 @@ jobs:
           # 采集期间 state 可能已通过 Contents API 提交，先把远端变更 rebase 上来
           git pull --rebase --autostash origin main
           git push
+
+      - name: Heartbeat
+        run: |
+          # 公开仓库 60 天无提交会被 GitHub 自动停用定时任务，这里提前补一次提交
+          last=$(git log -1 --format=%ct)
+          now=$(date +%s)
+          days=$(( (now - last) / 86400 ))
+          echo "最近一次提交：$days 天前"
+          if [ "$days" -lt 25 ]; then
+            echo "无需心跳"
+            exit 0
+          fi
+          date -u +"%Y-%m-%dT%H:%M:%SZ" > state/heartbeat.txt
+          git add state/heartbeat.txt
+          git commit -m "chore: heartbeat"
+          git pull --rebase --autostash origin main
+          git push
+          echo "已写入心跳，重置 60 天计时"
