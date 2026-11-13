@@ -1,0 +1,33 @@
+{
+  "cooldowns": {},
+  "cursors": {
+    "LinYuKernel1": 336
+  },
+  "files": {
+    "-1003818954961:336": {
+      "attempts": 0,
+      "channel_id": "LinYuKernel1",
+      "error": "",
+      "key": "",
+      "message_id": 336,
+      "name": "LinYuKernel.Ver.1.2.2.zip",
+      "parts": [
+        {
+          "key": "latest/LinYuKernel.Ver.1.2.2.sh",
+          "name": "LinYuKernel.Ver.1.2.2.sh",
+          "sha256": "e6f981f4b1a0471356246a3851fa19297bf1a3fdd609b5fa33ba78ea13c31c6e",
+          "size": 5864301,
+          "url": "https://github.com/FRLnb886/tg-file-harvest/releases/download/latest/LinYuKernel.Ver.1.2.2.sh"
+        }
+      ],
+      "sha256": "23cb0024ead45ea33493fd462d348a6b8942b742bb73e3cd9f9b00fd8f149f6b",
+      "size": 5860127,
+      "status": "ok",
+      "ts": 1794439927,
+      "unique_id": "-1003818954961:336",
+      "url": ""
+    }
+  },
+  "updated_at": 1794565470,
+  "version": 1
+}
