@@ -1,0 +1,20 @@
+# 非敏感配置；api_id / api_hash / session / R2 凭据一律走环境变量或 GitHub Secrets
+telegram:
+  api_id: 0
+  api_hash: ""
+  rate_limit: 1.5        # 每次请求的间隔（秒），Actions 出口 IP 建议 1.5~2
+  flood_extra: 5         # 命中 FloodWait 时的额外等待
+  flood_max_sleep: 300   # 等待超过这个秒数就中止本轮，交给下一次 cron
+  notify_chat_id: ""     # 可选：接收新文件通知的 chat id
+
+storage:
+  state_key: "state/state.json"
+  key_prefix: "files"
+  public_base: ""        # 例如 https://pub-xxxxxxxx.r2.dev
+
+collect:
+  min_size: 1024
+  max_size: 524288000    # 500MB，上限不可再调高
+  retention_days: 90
+  download_dir: "work/downloads"
+  state_path: "work/state.json"

@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>文件采集控制台</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <span class="brand-mark">TF</span>
+          <span class="brand-text">
+            <strong>文件采集</strong>
+            <small>TG → R2 → Pages</small>
+          </span>
+        </div>
+
+        <nav class="nav" id="nav">
+          <button class="nav-item is-active" data-view="dashboard" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 13h6V4H4v9Zm0 7h6v-5H4v5Zm10 0h6v-9h-6v9Zm0-16v5h6V4h-6Z" /></svg>
+            概览
+          </button>
+          <button class="nav-item" data-view="files" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h6l2 2h8v12H4V5Z" /></svg>
+            文件库
+          </button>
+          <button class="nav-item" data-view="channels" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h10" /></svg>
+            频道与关键词
+          </button>
+          <button class="nav-item" data-view="account" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm-8 9a8 8 0 0 1 16 0" /></svg>
+            TG 账号
+          </button>
+          <button class="nav-item" data-view="logs" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14v16H5V4Zm3 4h8M8 12h8M8 16h5" /></svg>
+            运行日志
+          </button>
+        </nav>
+
+        <div class="sidebar-foot">
+          <span class="badge" id="mode-badge">连接中…</span>
+          <button class="link-btn" id="token-btn" type="button">设置访问令牌</button>
+        </div>
+      </aside>
+
+      <main class="main">
+        <header class="topbar">
+          <div class="topbar-title">
+            <h1 id="view-title">概览</h1>
+            <p class="muted" id="view-sub">正在读取面板状态…</p>
+          </div>
+          <div class="topbar-actions">
+            <button class="btn ghost" id="refresh-btn" type="button">刷新</button>
+            <button class="btn primary" id="run-btn" type="button">立即采集</button>
+          </div>
+        </header>
+
+        <section class="view is-active" data-view-panel="dashboard">
+          <div class="cards">
+            <article class="card stat">
+              <span class="stat-label">已入库</span>
+              <strong class="stat-value" id="stat-ok">0</strong>
+              <span class="stat-hint">个文件</span>
+            </article>
+            <article class="card stat">
+              <span class="stat-label">失败</span>
+              <strong class="stat-value warn" id="stat-failed">0</strong>
+              <span class="stat-hint" id="stat-failed-hint">重试中</span>
+            </article>
+            <article class="card stat">
+              <span class="stat-label">跳过</span>
+              <strong class="stat-value" id="stat-skipped">0</strong>
+              <span class="stat-hint">被过滤</span>
+            </article>
+            <article class="card stat">
+              <span class="stat-label">频道</span>
+              <strong class="stat-value" id="stat-channels">0</strong>
+              <span class="stat-hint" id="stat-channels-hint">全部启用</span>
+            </article>
+          </div>
+
+          <div class="grid-2">
+            <article class="card">
+              <div class="card-head">
+                <h2>TG 账号</h2>
+                <span class="pill" id="account-pill">未配置</span>
+              </div>
+              <p class="muted" id="account-line">还没有保存 session。</p>
+              <div class="row end">
+                <button class="btn ghost small" data-goto="account" type="button">账号设置</button>
+              </div>
+            </article>
+
+            <article class="card">
+              <div class="card-head">
+                <h2>最近一次采集</h2>
+                <span class="pill" id="run-pill">—</span>
+              </div>
+              <p class="muted" id="run-line">还没有运行记录。</p>
+              <div class="row end">
+                <button class="btn ghost small" data-goto="logs" type="button">查看日志</button>
+              </div>
+            </article>
+          </div>
+
+          <article class="card">
+            <div class="card-head">
+              <h2>采集关键词</h2>
+              <span class="muted" id="keyword-hint">来自各频道的「包含关键词」</span>
+            </div>
+            <div class="chips" id="keyword-chips"></div>
+          </article>
+        </section>
+
+        <section class="view" data-view-panel="files">
+          <article class="card">
+            <div class="toolbar">
+              <input id="file-q" type="search" placeholder="搜索文件名…" autocomplete="off" />
+              <select id="file-channel" aria-label="按频道筛选"><option value="">全部频道</option></select>
+              <select id="file-status" aria-label="按状态筛选">
+                <option value="">全部状态</option>
+                <option value="ok">已入库</option>
+                <option value="failed">失败</option>
+                <option value="skipped">跳过</option>
+              </select>
+              <span class="muted grow" id="file-count"></span>
+            </div>
+
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>文件名</th>
+                    <th class="col-size">大小</th>
+                    <th class="col-channel">频道</th>
+                    <th class="col-status">状态</th>
+                    <th class="col-time">时间</th>
+                    <th class="col-actions">操作</th>
+                  </tr>
+                </thead>
+                <tbody id="file-rows"></tbody>
+              </table>
+            </div>
+
+            <div class="pager">
+              <button class="btn ghost small" id="prev-page" type="button">上一页</button>
+              <span class="muted" id="page-info"></span>
+              <button class="btn ghost small" id="next-page" type="button">下一页</button>
+            </div>
+          </article>
+        </section>
+
+        <section class="view" data-view-panel="channels">
+          <div class="view-head">
+            <p class="muted">
+              包含关键词留空表示不过滤；填了就只在文件名或描述命中其中一个时采集。排除关键词命中即跳过。填写后记得保存。
+            </p>
+            <div class="row">
+              <button class="btn ghost" id="add-channel" type="button">新增频道</button>
+              <button class="btn primary" id="save-channels" type="button">保存</button>
+            </div>
+          </div>
+          <div class="channel-list" id="channel-list"></div>
+        </section>
+
+        <section class="view" data-view-panel="account">
+          <article class="card">
+            <div class="card-head">
+              <h2>当前账号</h2>
+              <span class="pill" id="acc-pill">未配置</span>
+            </div>
+            <p class="muted" id="acc-status">还没有保存 session。</p>
+            <div class="row end">
+              <button class="btn ghost small" id="acc-check" type="button">检查有效性</button>
+              <button class="btn danger small" id="acc-logout" type="button">退出登录</button>
+            </div>
+          </article>
+
+          <article class="card" id="login-card">
+            <div class="card-head">
+              <h2>登录 TG 账号</h2>
+              <span class="pill" id="login-pill">第 1 步</span>
+            </div>
+            <p class="muted">
+              api_id / api_hash 在 my.telegram.org 创建应用后获取。登录成功后 session 写入 <code>.env</code>（权限 600），
+              建议用小号。
+            </p>
+
+            <div class="form-grid">
+              <label>api_id<input id="login-api-id" inputmode="numeric" autocomplete="off" /></label>
+              <label>api_hash<input id="login-api-hash" autocomplete="off" /></label>
+              <label class="span-2">手机号（含国家码）<input id="login-phone" placeholder="+8613800000000" autocomplete="off" /></label>
+              <div class="span-2 row">
+                <button class="btn primary" id="login-send" type="button">发送验证码</button>
+                <span class="muted" id="login-hint"></span>
+              </div>
+            </div>
+
+            <div class="form-grid" id="login-step2" hidden>
+              <label class="span-2">验证码<input id="login-code" inputmode="numeric" autocomplete="one-time-code" /></label>
+              <div class="span-2 row">
+                <button class="btn primary" id="login-code-btn" type="button">提交验证码</button>
+              </div>
+            </div>
+
+            <div class="form-grid" id="login-step3" hidden>
+              <label class="span-2">两步验证密码<input id="login-password" type="password" autocomplete="off" /></label>
+              <div class="span-2 row">
+                <button class="btn primary" id="login-password-btn" type="button">提交密码</button>
+              </div>
+            </div>
+          </article>
+        </section>
+
+        <section class="view" data-view-panel="logs">
+          <article class="card">
+            <div class="toolbar">
+              <select id="run-select" aria-label="选择运行记录"><option value="">选择运行记录</option></select>
+              <label class="check"><input type="checkbox" id="auto-refresh" checked /> 自动刷新</label>
+              <label class="check"><input type="checkbox" id="auto-scroll" checked /> 自动滚动</label>
+              <button class="btn ghost small" id="copy-log" type="button">复制</button>
+            </div>
+            <pre class="log" id="log-view">还没有日志。点右上角「立即采集」跑一次。</pre>
+          </article>
+        </section>
+      </main>
+    </div>
+
+    <div class="modal" id="token-modal" hidden>
+      <form class="modal-card" id="token-form">
+        <h2>输入访问令牌</h2>
+        <p class="muted">面板启动时终端会打印令牌，也存在 <code>work/panel-token</code> 文件里。</p>
+        <input id="token-input" type="password" autocomplete="off" placeholder="粘贴令牌" />
+        <div class="row end">
+          <button class="btn ghost" id="token-cancel" type="button">取消</button>
+          <button class="btn primary" type="submit">保存</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="toast" id="toast" hidden></div>
+    <script src="app.js"></script>
+  </body>
+</html>

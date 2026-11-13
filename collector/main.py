@@ -1,0 +1,257 @@
+from __future__ import annotations
+
+import argparse
+import asyncio
+import logging
+from pathlib import Path
+from typing import Any, Sequence
+
+from . import config, notifier, poller
+from .downloader import DownloadResult, SkipFile, download_file
+from .models import Channel, FileRecord, Settings
+from .naming import extract_name, sanitize_name
+from .storage_r2 import R2Error, R2Storage
+from .store import ACCOUNT_KEY, Store, StoreError
+from .telegram_client import FloodWaitAbort, TelegramError, TgClient
+
+log = logging.getLogger("collector")
+
+SAVE_EVERY = 50
+MAX_ATTEMPTS = 3
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="collector.main", description="Telegram 频道文件采集")
+    parser.add_argument("--config", default="config", help="配置目录")
+    parser.add_argument("--dry-run", action="store_true", help="只下载并打印，不上传、不写 R2 状态")
+    parser.add_argument(
+        "--limit", type=int, default=0, help="每个频道本轮最多入库的文件数，0 表示不限"
+    )
+    parser.add_argument("--prune-only", action="store_true", help="只清理超过保留期的记录与对象")
+    parser.add_argument("--log-level", default="INFO")
+    return parser
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    logging.basicConfig(
+        level=getattr(logging, str(args.log_level).upper(), logging.INFO),
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+
+    try:
+        settings = config.load(
+            args.config,
+            require_telegram=not args.prune_only,
+            require_storage=not args.dry_run,
+            require_public_url=not args.dry_run and not args.prune_only,
+        )
+    except config.ConfigError as exc:
+        log.error("配置错误：%s", exc)
+        return 2
+    storage = R2Storage(settings.storage)
+    store = Store(settings.collect.state_path, backend=storage if storage.configured else None)
+    store.load()
+
+    try:
+        if args.prune_only:
+            prune(settings, store, storage)
+            return 0
+        asyncio.run(collect(settings, store, storage, args))
+    except KeyboardInterrupt:
+        log.warning("已中断")
+        return 130
+    except (TelegramError, R2Error, StoreError) as exc:
+        log.error("%s", exc)
+        return 1
+    finally:
+        # dry-run 不能推进游标落盘，否则真正采集会跳过这些消息
+        if not args.dry_run:
+            store.save()
+
+    log.info("本轮结束，状态分布：%s", store.counts())
+    return 0
+
+
+def prune(settings: Settings, store: Store, storage: R2Storage) -> int:
+    expired = store.prune(settings.collect.retention_days)
+    keys = [str(record.get("key")) for record in expired if record.get("key")]
+    deleted = storage.delete_keys(keys) if keys and storage.configured else 0
+    if keys and not storage.configured:
+        log.warning("R2 未配置，只清理了本地记录，对象未删除")
+    log.info("清理过期记录 %s 条，删除对象 %s 个", len(expired), deleted)
+    return len(expired)
+
+
+async def collect(settings: Settings, store: Store, storage: R2Storage, args: Any) -> None:
+    tg = TgClient(
+        settings.telegram,
+        on_flood_wait=lambda seconds: store.set_cooldown(ACCOUNT_KEY, seconds),
+    )
+    await tg.connect()
+    try:
+        for channel in settings.channels:
+            if not channel.enabled:
+                log.info("跳过停用频道 %s", channel.id)
+                continue
+            if store.is_cooling_down(ACCOUNT_KEY):
+                log.warning("账号仍在 FloodWait 冷却期，本轮不再继续")
+                break
+            try:
+                saved = await handle_channel(tg, store, storage, settings, channel, args)
+                log.info("频道 %s 完成，新增入库 %s 个文件", channel.id, saved)
+            except FloodWaitAbort as exc:
+                log.error("FloodWait 退避超过上限，中止本轮：%s", exc)
+                break
+            except Exception:
+                log.exception("频道 %s 处理失败", channel.id)
+            if not args.dry_run:
+                store.save()
+    finally:
+        await tg.disconnect()
+
+
+async def handle_channel(
+    tg: TgClient,
+    store: Store,
+    storage: R2Storage,
+    settings: Settings,
+    channel: Channel,
+    args: Any,
+) -> int:
+    cursor = store.cursor(channel.id)
+    log.info("频道 %s 从游标 %s 开始", channel.id, cursor)
+    saved = 0
+    pending = 0
+    async for message in tg.iter_channel_messages(channel.id, cursor):
+        outcome = await process_message(tg, store, storage, settings, channel, message, args)
+        if outcome == "retry":
+            log.warning("停在消息 %s，下次运行重试", message.id)
+            break
+        store.update_cursor(channel.id, int(message.id))
+        pending += 1
+        if outcome == "ok":
+            saved += 1
+        # 首次跑大频道容易被 Actions 的 10 分钟超时杀掉，定期落盘才能从游标续跑
+        if not args.dry_run and pending >= SAVE_EVERY:
+            store.save()
+            pending = 0
+        if args.limit and saved >= args.limit:
+            log.info("频道 %s 达到本轮上限 %s，提前结束", channel.id, args.limit)
+            break
+    return saved
+
+
+async def process_message(
+    tg: TgClient,
+    store: Store,
+    storage: R2Storage,
+    settings: Settings,
+    channel: Channel,
+    message: Any,
+    args: Any,
+) -> str:
+    if not poller.is_eligible(message, channel, settings.collect):
+        return "filtered"
+
+    unique_id = unique_id_of(message)
+    if store.should_skip(unique_id):
+        return "duplicate"
+
+    name = sanitize_name(extract_name(message))
+    try:
+        result: DownloadResult = await tg.run(
+            lambda: download_file(tg, message, settings.collect.download_dir, channel.max_size)
+        )
+    except SkipFile as exc:
+        if exc.reason == "empty_download":
+            return record_failure(store, message, channel, name, exc.reason)
+        store.upsert(record_of(message, channel, name, status="skipped", error=exc.reason))
+        log.info("跳过 %s：%s", name, exc.reason)
+        return "skipped"
+    except FloodWaitAbort:
+        raise
+    except Exception as exc:
+        log.exception("下载失败：%s", name)
+        return record_failure(store, message, channel, name, f"{type(exc).__name__}: {exc}")
+
+    try:
+        if args.dry_run:
+            log.info("[dry-run] %s（%s 字节）", name, result.size)
+            return "ok"
+
+        key, url = storage.upload_and_url(result.sha256, result.path, channel.id, name)
+        store.upsert(
+            record_of(
+                message,
+                channel,
+                name,
+                status="ok",
+                size=result.size,
+                sha256=result.sha256,
+                key=key,
+                url=url,
+            )
+        )
+        log.info("入库 %s -> %s", name, url)
+        notifier.notify(settings.telegram, name, url)
+        return "ok"
+    finally:
+        Path(result.path).unlink(missing_ok=True)
+
+
+def record_failure(store: Store, message: Any, channel: Channel, name: str, reason: str) -> str:
+    previous = store.files.get(unique_id_of(message)) or {}
+    attempts = int(previous.get("attempts") or 0) + 1
+    store.upsert(
+        record_of(message, channel, name, status="failed", error=reason, attempts=attempts)
+    )
+    if attempts < MAX_ATTEMPTS:
+        log.warning("%s 失败（第 %s/%s 次）：%s", name, attempts, MAX_ATTEMPTS, reason)
+        return "retry"
+    log.error("%s 连续失败 %s 次，放弃并推进游标：%s", name, attempts, reason)
+    return "failed"
+
+
+def unique_id_of(message: Any) -> str:
+    file = getattr(message, "file", None)
+    unique_id = getattr(file, "unique_id", None) if file is not None else None
+    if unique_id:
+        return str(unique_id)
+    return f"{getattr(message, 'chat_id', 'unknown')}:{getattr(message, 'id', 0)}"
+
+
+def record_of(
+    message: Any,
+    channel: Channel,
+    name: str,
+    *,
+    status: str,
+    size: int = 0,
+    sha256: str = "",
+    key: str = "",
+    url: str = "",
+    error: str = "",
+    attempts: int = 0,
+) -> FileRecord:
+    file = getattr(message, "file", None)
+    fallback_size = int(getattr(file, "size", 0) or 0) if file is not None else 0
+    date = getattr(message, "date", None)
+    return FileRecord(
+        unique_id=unique_id_of(message),
+        channel_id=channel.id,
+        message_id=int(getattr(message, "id", 0)),
+        name=name,
+        size=int(size or fallback_size),
+        sha256=sha256,
+        key=key,
+        url=url,
+        ts=int(date.timestamp()) if date is not None else 0,
+        status=status,
+        error=error,
+        attempts=attempts,
+    )
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

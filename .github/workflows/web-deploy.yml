@@ -1,0 +1,62 @@
+name: pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "web/**"
+      - ".github/workflows/web-deploy.yml"
+  # 定时任务用 GITHUB_TOKEN 提交，不会触发 push 事件，必须靠 workflow_run 兜住
+  workflow_run:
+    workflows: [collect, prune]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  changed:
+    runs-on: ubuntu-latest
+    outputs:
+      manifest: ${{ steps.diff.outputs.manifest }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Check manifest change
+        id: diff
+        run: |
+          if git diff --quiet HEAD^ HEAD -- web/data/manifest.json 2>/dev/null; then
+            echo "manifest=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "manifest=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  deploy:
+    needs: changed
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.conclusion == 'success' && needs.changed.outputs.manifest == 'true')
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web
+
+      - id: deployment
+        uses: actions/deploy-pages@v4
