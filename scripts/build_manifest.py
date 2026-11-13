@@ -12,19 +12,43 @@ from typing import Any
 def build_manifest(state: dict[str, Any], limit: int) -> dict[str, Any]:
     files = state.get("files") or {}
     items: list[dict[str, Any]] = []
-    for record in files.values():
+    for record_id, record in files.items():
         if not isinstance(record, dict):
             continue
-        if record.get("status") != "ok" or not record.get("url"):
+        if record.get("status") != "ok":
+            continue
+        ts = int(record.get("ts") or 0)
+        channel = str(record.get("channel_id", ""))
+        parts = record.get("parts") or []
+        if parts:
+            # zip 解压出来的文件逐个展开成直链
+            for index, part in enumerate(parts):
+                url = str(part.get("url") or "")
+                if not url:
+                    continue
+                items.append(
+                    {
+                        "id": f"{record_id}#{index}",
+                        "name": str(part.get("name", "")),
+                        "size": int(part.get("size") or 0),
+                        "url": url,
+                        "ts": ts,
+                        "channel": channel,
+                        "from": str(record.get("name", "")),
+                    }
+                )
+            continue
+        url = str(record.get("url") or "")
+        if not url:
             continue
         items.append(
             {
-                "id": str(record.get("unique_id", "")),
+                "id": str(record_id),
                 "name": str(record.get("name", "")),
                 "size": int(record.get("size") or 0),
-                "url": str(record["url"]),
-                "ts": int(record.get("ts") or 0),
-                "channel": str(record.get("channel_id", "")),
+                "url": url,
+                "ts": ts,
+                "channel": channel,
             }
         )
     items.sort(key=lambda item: (-item["ts"], item["id"]))

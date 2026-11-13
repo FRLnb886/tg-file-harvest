@@ -23,7 +23,7 @@ cron → collect.yml → collector/main.py
 
 | 路径 | 职责 |
 | --- | --- |
-| `.github/workflows/collect.yml` | 每 15 分钟采集一轮，串行、10 分钟超时、可回写 manifest |
+| `.github/workflows/collect.yml` | 每 30 分钟采集一轮，串行、10 分钟超时、可回写 manifest |
 | `.github/workflows/prune.yml` | 每周按 `retention_days` 清理过期记录与 R2 对象 |
 | `.github/workflows/web-deploy.yml` | 把 `web/` 发布到 GitHub Pages；定时任务用 `GITHUB_TOKEN` 提交触发不了 push，所以额外挂 `workflow_run`，且只在 manifest 真变了时部署 |
 | `collector/main.py` | 编排：单频道异常隔离、逐频道落盘状态 |
@@ -33,6 +33,7 @@ cron → collect.yml → collector/main.py
 | `collector/telegram_client.py` | Telethon 封装：StringSession、限速、FloodWait、重连 |
 | `collector/poller.py` | 增量拉取（`min_id`，从旧到新）与入参过滤 |
 | `collector/naming.py` | 文件名提取优先级链 + 规范化 |
+| `collector/archive.py` | zip 安全解压（挡目录穿越/符号链接/zip bomb） |
 | `collector/downloader.py` | 大小预检、`.tmp_` 下载、sha256、原子改名 |
 | `collector/storage_r2.py` | R2 上传、直链、幂等头检查、批量删除 |
 | `collector/notifier.py` | 可选 Bot 通知，失败只记日志 |
@@ -74,6 +75,8 @@ python -m panel            # 默认 http://127.0.0.1:8787
 - `--limit N` 可限制单轮入库数量，避免首次跑满 10 分钟超时。
 - 对象 key 为 `files/<channel>/<sha 前 12 位>/<文件名>`，同内容天然幂等；下载时通过 `Content-Disposition` 保留原始文件名。
 - 频道的 `include_keywords` 非空时，只有文件名/描述命中其中任一关键词才采集；`exclude_keywords` 命中即跳过。
+- `latest_only: true`：只取频道里**最新一个**匹配文件，每轮只检查是否有更新（追版本用，不扫历史）。
+- `extract_zip: true`：zip 在服务器解压，包内每个文件各自上传并生成直链，manifest 里逐个展开；zip 本体不上传。解压会挡目录穿越、符号链接、超大/超多文件。
 - 失败不再静默跳过：单个文件失败会保留游标、下次运行重试，连续失败 3 次（`MAX_ATTEMPTS`）后放弃并推进游标，同时留下 `failed` 记录和 `attempts` 次数。
 - 每处理 50 条消息落盘一次状态，首次跑大频道被 Actions 10 分钟超时杀掉后，下一轮能接着游标继续，不用从头再来。
 - 公开桶意味着「谁有链接谁下」：靠不可枚举的 key、`noindex`、必要时 Cloudflare Access 或签名 URL 控制。

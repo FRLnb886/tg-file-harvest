@@ -668,6 +668,34 @@ td.empty {
   grid-column: 1 / -1;
 }
 
+.channel-flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--line-soft);
+}
+
+tr.subrow {
+  background: rgba(255, 255, 255, 0.018);
+}
+
+tr.subrow:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+td.name.sub {
+  padding-left: 26px;
+  color: #b9c2d0;
+}
+
+.tag-info {
+  border-color: rgba(123, 92, 255, 0.4);
+  color: #b7a6ff;
+  background: rgba(123, 92, 255, 0.12);
+}
+
 .form-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));

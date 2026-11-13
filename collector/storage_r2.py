@@ -101,8 +101,9 @@ class R2Storage:
                 return False
             raise
 
-    def build_key(self, channel_id: str, sha256: str, name: str) -> str:
-        parts = [part for part in (self._prefix, _safe_segment(channel_id), sha256[:12]) if part]
+    def build_key(self, channel_id: str, digest: str, name: str, group: str = "") -> str:
+        segment = group or digest[:12]
+        parts = [part for part in (self._prefix, _safe_segment(channel_id), segment) if part]
         return "/".join(parts + [_safe_segment(name)])
 
     def public_url(self, key: str) -> str:
@@ -119,9 +120,9 @@ class R2Storage:
         self._client().upload_file(str(local_path), self._bucket, key, ExtraArgs=extra)
 
     def upload_and_url(
-        self, sha256: str, local_path: str, channel_id: str, name: str
+        self, sha256: str, local_path: str, channel_id: str, name: str, group: str = ""
     ) -> tuple[str, str]:
-        key = self.build_key(channel_id, sha256, name)
+        key = self.build_key(channel_id, sha256, name, group)
         if self.exists(key):
             log.info("对象已存在，跳过上传: %s", key)
         else:

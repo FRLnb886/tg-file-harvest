@@ -19,6 +19,8 @@ FIELDS = (
     "include_ext",
     "include_keywords",
     "exclude_keywords",
+    "latest_only",
+    "extract_zip",
 )
 
 
@@ -47,6 +49,8 @@ def list_channels() -> list[dict[str, Any]]:
                 "include_ext": [str(x) for x in (item.get("include_ext") or [])],
                 "include_keywords": [str(x) for x in (item.get("include_keywords") or [])],
                 "exclude_keywords": [str(x) for x in (item.get("exclude_keywords") or [])],
+                "latest_only": bool(item.get("latest_only", False)),
+                "extract_zip": bool(item.get("extract_zip", False)),
             }
         )
     return result

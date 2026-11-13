@@ -3,13 +3,15 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import shutil
 from pathlib import Path
 from typing import Any, Sequence
 
 from . import config, notifier, poller
-from .downloader import DownloadResult, SkipFile, download_file
+from .archive import ArchiveError, extract_zip
+from .downloader import DownloadResult, SkipFile, download_file, sha256_file
 from .models import Channel, FileRecord, Settings
-from .naming import extract_name, sanitize_name
+from .naming import extension, extract_name, sanitize_name
 from .storage_r2 import R2Error, R2Storage
 from .store import ACCOUNT_KEY, Store, StoreError
 from .telegram_client import FloodWaitAbort, TelegramError, TgClient
@@ -119,6 +121,9 @@ async def handle_channel(
     channel: Channel,
     args: Any,
 ) -> int:
+    if channel.latest_only:
+        return await handle_latest(tg, store, storage, settings, channel, args)
+
     cursor = store.cursor(channel.id)
     log.info("频道 %s 从游标 %s 开始", channel.id, cursor)
     saved = 0
@@ -140,6 +145,35 @@ async def handle_channel(
             log.info("频道 %s 达到本轮上限 %s，提前结束", channel.id, args.limit)
             break
     return saved
+
+
+async def handle_latest(
+    tg: TgClient,
+    store: Store,
+    storage: R2Storage,
+    settings: Settings,
+    channel: Channel,
+    args: Any,
+    scan: int = 50,
+) -> int:
+    """只取最新一个匹配文件：追版本用，每轮只检查是否有更新，不扫历史。"""
+    log.info("频道 %s 只取最新一个匹配文件（向后看 %s 条）", channel.id, scan)
+    async for message in tg.iter_latest_messages(channel.id, scan):
+        if not poller.is_eligible(message, channel, settings.collect):
+            continue
+        unique_id = unique_id_of(message)
+        if store.should_skip(unique_id):
+            known = (store.files.get(unique_id) or {}).get("name", unique_id)
+            log.info("最新匹配文件已入库，本轮无需更新：%s", known)
+            return 0
+        outcome = await process_message(tg, store, storage, settings, channel, message, args)
+        if outcome in {"ok", "skipped", "duplicate"}:
+            store.update_cursor(channel.id, int(message.id))
+        if not args.dry_run:
+            store.save()
+        return 1 if outcome == "ok" else 0
+    log.info("频道 %s 最近 %s 条里没有匹配的文件", channel.id, scan)
+    return 0
 
 
 async def process_message(
@@ -178,19 +212,39 @@ async def process_message(
     try:
         if args.dry_run:
             log.info("[dry-run] %s（%s 字节）", name, result.size)
+            if channel.extract_zip and extension(name) == "zip":
+                try:
+                    preview = extract_zip(result.path, Path(settings.collect.download_dir) / ".preview")
+                    log.info("[dry-run] 解压后 %s 个文件：%s", len(preview), ", ".join(p.name for p in preview[:5]))
+                except ArchiveError as exc:
+                    log.warning("[dry-run] 解压失败：%s", exc)
+                finally:
+                    shutil.rmtree(Path(settings.collect.download_dir) / ".preview", ignore_errors=True)
+            return "ok"
+
+        if channel.extract_zip and extension(name) == "zip":
+            try:
+                parts = upload_zip_parts(
+                    storage, channel, result.sha256, Path(result.path), settings.collect.download_dir
+                )
+            except ArchiveError as exc:
+                log.error("解压失败 %s：%s", name, exc)
+                return record_failure(store, message, channel, name, f"ArchiveError: {exc}")
+            store.upsert(
+                record_of(
+                    message, channel, name, status="ok", size=result.size,
+                    sha256=result.sha256, parts=parts,
+                )
+            )
+            log.info("解压入库 %s -> %s 个文件（首个：%s）", name, len(parts), parts[0]["url"])
+            notifier.notify(settings.telegram, name, parts[0]["url"])
             return "ok"
 
         key, url = storage.upload_and_url(result.sha256, result.path, channel.id, name)
         store.upsert(
             record_of(
-                message,
-                channel,
-                name,
-                status="ok",
-                size=result.size,
-                sha256=result.sha256,
-                key=key,
-                url=url,
+                message, channel, name, status="ok", size=result.size,
+                sha256=result.sha256, key=key, url=url,
             )
         )
         log.info("入库 %s -> %s", name, url)
@@ -213,6 +267,33 @@ def record_failure(store: Store, message: Any, channel: Channel, name: str, reas
     return "failed"
 
 
+def upload_zip_parts(
+    storage: R2Storage, channel: Channel, archive_sha: str, archive_path: Path, work_dir: str
+) -> list[dict[str, Any]]:
+    extract_dir = Path(work_dir) / f".x_{archive_sha[:12]}"
+    try:
+        files = extract_zip(archive_path, extract_dir)
+        parts: list[dict[str, Any]] = []
+        for path in files:
+            digest = sha256_file(path)
+            key, url = storage.upload_and_url(
+                digest, str(path), channel.id, path.name, group=archive_sha[:12]
+            )
+            parts.append(
+                {
+                    "name": path.name,
+                    "size": path.stat().st_size,
+                    "sha256": digest,
+                    "key": key,
+                    "url": url,
+                }
+            )
+        log.info("解压 %s 得到 %s 个文件并已上传", archive_path.name, len(parts))
+        return parts
+    finally:
+        shutil.rmtree(extract_dir, ignore_errors=True)
+
+
 def unique_id_of(message: Any) -> str:
     file = getattr(message, "file", None)
     unique_id = getattr(file, "unique_id", None) if file is not None else None
@@ -233,6 +314,7 @@ def record_of(
     url: str = "",
     error: str = "",
     attempts: int = 0,
+    parts: list[dict[str, Any]] | None = None,
 ) -> FileRecord:
     file = getattr(message, "file", None)
     fallback_size = int(getattr(file, "size", 0) or 0) if file is not None else 0
@@ -250,6 +332,7 @@ def record_of(
         status=status,
         error=error,
         attempts=attempts,
+        parts=parts or [],
     )
 
 

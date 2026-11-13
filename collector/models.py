@@ -16,6 +16,8 @@ class Channel:
     include_ext: list[str] | None = None
     include_keywords: list[str] = field(default_factory=list)
     exclude_keywords: list[str] = field(default_factory=list)
+    latest_only: bool = False
+    extract_zip: bool = False
 
     def __post_init__(self) -> None:
         self.id = str(self.id).strip()
@@ -98,6 +100,7 @@ class FileRecord:
     status: str = "pending"
     error: str = ""
     attempts: int = 0
+    parts: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

@@ -44,6 +44,8 @@ class ChannelItem(BaseModel):
     include_ext: list[str] = Field(default_factory=list)
     include_keywords: list[str] = Field(default_factory=list)
     exclude_keywords: list[str] = Field(default_factory=list)
+    latest_only: bool = False
+    extract_zip: bool = False
 
 
 class ChannelPayload(BaseModel):
@@ -116,6 +118,15 @@ def records(
                 "url": str(record.get("url") or ""),
                 "error": str(record.get("error") or ""),
                 "attempts": int(record.get("attempts") or 0),
+                "parts": [
+                    {
+                        "name": str(part.get("name", "")),
+                        "size": int(part.get("size") or 0),
+                        "url": str(part.get("url") or ""),
+                    }
+                    for part in (record.get("parts") or [])
+                    if isinstance(part, dict)
+                ],
             }
         )
     rows.sort(key=lambda row: (-row["ts"], row["id"]))

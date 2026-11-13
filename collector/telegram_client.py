@@ -96,6 +96,18 @@ class TgClient:
             wait = self._flood_delay(exc)
             raise FloodWaitAbort(f"拉取消息时命中 FloodWait {wait}s") from exc
 
+    async def iter_latest_messages(
+        self, channel_id: str, limit: int = 50
+    ) -> AsyncIterator[Any]:
+        from telethon.errors import FloodWaitError
+
+        try:
+            async for message in self.raw.iter_messages(channel_id, limit=limit):
+                yield message
+        except FloodWaitError as exc:
+            wait = self._flood_delay(exc)
+            raise FloodWaitAbort(f"拉取最新消息时命中 FloodWait {wait}s") from exc
+
     def _flood_delay(self, exc: Any) -> int:
         wait = int(getattr(exc, "seconds", 0) or 0) + int(self._settings.flood_extra)
         log.warning("Telegram 限流，需要等待 %s 秒", wait)

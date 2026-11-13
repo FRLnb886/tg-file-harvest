@@ -287,6 +287,10 @@ function channelCard(channel) {
       <label>包含关键词（逗号分隔）<input data-field="include_keywords" placeholder="教程, 资料" spellcheck="false" /></label>
       <label class="span-2">排除关键词（逗号分隔）<input data-field="exclude_keywords" placeholder="广告, 推广" spellcheck="false" /></label>
     </div>
+    <div class="channel-flags">
+      <label class="switch"><input type="checkbox" data-field="latest_only" /> 只取最新一个（追版本）</label>
+      <label class="switch"><input type="checkbox" data-field="extract_zip" /> zip 解压后逐个出直链</label>
+    </div>
   `;
   const value = (field, v) => {
     const node = card.querySelector(`[data-field="${field}"]`);
@@ -301,6 +305,8 @@ function channelCard(channel) {
   value("include_ext", (channel.include_ext || []).join(", "));
   value("include_keywords", (channel.include_keywords || []).join(", "));
   value("exclude_keywords", (channel.exclude_keywords || []).join(", "));
+  value("latest_only", channel.latest_only === true);
+  value("extract_zip", channel.extract_zip === true);
   card.querySelector('[data-action="remove"]').addEventListener("click", () => {
     card.remove();
   });
@@ -341,6 +347,8 @@ function collectChannels() {
       include_ext: splitList(read("include_ext").value),
       include_keywords: splitList(read("include_keywords").value),
       exclude_keywords: splitList(read("exclude_keywords").value),
+      latest_only: read("latest_only").checked,
+      extract_zip: read("extract_zip").checked,
     };
   });
   return items;
@@ -427,6 +435,77 @@ async function loadFiles(reset = false) {
   renderFiles();
 }
 
+function downloadButton(url, label) {
+  const link = document.createElement("a");
+  link.className = "btn small";
+  link.href = url;
+  link.rel = "noopener noreferrer";
+  link.textContent = label;
+  return link;
+}
+
+function copyButton(url) {
+  const copy = document.createElement("button");
+  copy.type = "button";
+  copy.className = "btn ghost small";
+  copy.textContent = "复制";
+  copy.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(url);
+      copy.textContent = "已复制";
+    } catch (error) {
+      copy.textContent = "失败";
+    }
+    window.setTimeout(() => {
+      copy.textContent = "复制";
+    }, 1400);
+  });
+  return copy;
+}
+
+function partRow(part, parent) {
+  const row = document.createElement("tr");
+  row.className = "subrow";
+
+  const name = document.createElement("td");
+  name.className = "name sub";
+  name.textContent = `↳ ${part.name || "(未命名)"}`;
+  name.title = `${part.name || ""}\n来自 ${parent.name || ""}`;
+  row.appendChild(name);
+
+  const size = document.createElement("td");
+  size.className = "col-size mono";
+  size.textContent = formatSize(part.size);
+  row.appendChild(size);
+
+  const origin = document.createElement("td");
+  origin.className = "col-channel mono";
+  origin.textContent = "解压";
+  row.appendChild(origin);
+
+  const status = document.createElement("td");
+  status.className = "col-status";
+  const tag = document.createElement("span");
+  tag.className = "tag tag-info";
+  tag.textContent = "直链";
+  status.appendChild(tag);
+  row.appendChild(status);
+
+  const time = document.createElement("td");
+  time.className = "col-time mono";
+  time.textContent = "-";
+  row.appendChild(time);
+
+  const actions = document.createElement("td");
+  actions.className = "col-actions";
+  if (part.url) {
+    actions.appendChild(downloadButton(part.url, "下载"));
+    actions.appendChild(copyButton(part.url));
+  }
+  row.appendChild(actions);
+  return row;
+}
+
 function renderFiles() {
   const body = el("file-rows");
   body.textContent = "";
@@ -477,29 +556,13 @@ function renderFiles() {
     const actions = document.createElement("td");
     actions.className = "col-actions";
     if (item.url) {
-      const download = document.createElement("a");
-      download.className = "btn small";
-      download.href = item.url;
-      download.rel = "noopener noreferrer";
-      download.textContent = "下载";
-      actions.appendChild(download);
-
-      const copy = document.createElement("button");
-      copy.type = "button";
-      copy.className = "btn ghost small";
-      copy.textContent = "复制";
-      copy.addEventListener("click", async () => {
-        try {
-          await navigator.clipboard.writeText(item.url);
-          copy.textContent = "已复制";
-        } catch (error) {
-          copy.textContent = "失败";
-        }
-        window.setTimeout(() => {
-          copy.textContent = "复制";
-        }, 1400);
-      });
-      actions.appendChild(copy);
+      actions.appendChild(downloadButton(item.url, "下载"));
+      actions.appendChild(copyButton(item.url));
+    } else if (item.parts && item.parts.length) {
+      const hint = document.createElement("span");
+      hint.className = "muted";
+      hint.textContent = `含 ${item.parts.length} 个文件`;
+      actions.appendChild(hint);
     } else {
       const hint = document.createElement("span");
       hint.className = "muted";
@@ -508,6 +571,10 @@ function renderFiles() {
     }
     row.appendChild(actions);
     body.appendChild(row);
+
+    (item.parts || []).forEach((part) => {
+      body.appendChild(partRow(part, item));
+    });
   });
   updatePager();
 }
