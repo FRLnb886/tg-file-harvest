@@ -14,6 +14,7 @@ sys.path.insert(0, str(ROOT))
 
 from collector import config as config_module  # noqa: E402
 from collector.models import Settings  # noqa: E402
+from collector.storage_github import GitHubStorage  # noqa: E402
 from collector.storage_r2 import R2Storage  # noqa: E402
 
 
@@ -53,15 +54,21 @@ def load_settings(checks: Checks, config_dir: str, need_telegram: bool) -> Setti
     checks.ok("配置可加载", f"{len(settings.channels)} 个频道")
     checks.check("频道列表非空", bool(settings.channels), "channels.yaml 里至少配一个频道")
 
-    if settings.storage.configured:
-        checks.ok("R2 凭据齐全", settings.storage.bucket)
+    backend = settings.storage.backend
+    if backend == "github":
+        checks.ok("存储后端", f"github（{settings.storage.github_repo or '未设置仓库'}）")
+        if not settings.storage.github_repo or not settings.storage.github_token:
+            checks.warn("GitHub 存储凭据", "需要 GITHUB_REPOSITORY 与 GITHUB_TOKEN")
     else:
-        checks.warn("R2 凭据齐全", "未配置，只能 dry-run，无法上传")
-
-    if settings.storage.public_base:
-        checks.ok("公开直链前缀", settings.storage.public_base)
-    else:
-        checks.warn("公开直链前缀", "缺少 R2_PUBLIC_BASE，无法生成直链")
+        checks.ok("存储后端", "r2")
+        if settings.storage.configured:
+            checks.ok("R2 凭据齐全", settings.storage.bucket)
+        else:
+            checks.warn("R2 凭据齐全", "未配置，只能 dry-run，无法上传")
+        if settings.storage.public_base:
+            checks.ok("公开直链前缀", settings.storage.public_base)
+        else:
+            checks.warn("公开直链前缀", "缺少 R2_PUBLIC_BASE，无法生成直链")
     return settings
 
 
@@ -123,6 +130,30 @@ def check_manifest(checks: Checks, manifest_path: Path, state: dict[str, Any] | 
     checks.check("manifest 记录均来自已入库", not extra, f"{len(extra)} 条在 state 里找不到对应 ok 记录")
 
 
+def check_storage(checks: Checks, settings: Settings) -> None:
+    if settings.storage.backend != "github":
+        check_r2(checks, settings)
+        return
+    storage = GitHubStorage(settings.storage)
+    if not storage.configured:
+        checks.warn("GitHub 存储连通性", "缺少仓库或 token，跳过")
+        return
+    try:
+        release_id = storage._release_id(settings.storage.github_tag, create=False)
+        checks.ok(
+            "Release 可读",
+            f"tag={settings.storage.github_tag} id={release_id}" if release_id else "还没有 release，首次采集会自动创建",
+        )
+    except Exception as exc:
+        checks.fail("Release 可读", f"{type(exc).__name__}: {exc}")
+        return
+    try:
+        state = storage.get_json() or {}
+        checks.ok("状态可读", f"{len(state.get('files') or {})} 条记录")
+    except Exception as exc:
+        checks.fail("状态可读", f"{type(exc).__name__}: {exc}")
+
+
 def check_r2(checks: Checks, settings: Settings) -> None:
     storage = R2Storage(settings.storage)
     if not storage.configured:
@@ -172,7 +203,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--state", default="work/state.json")
     parser.add_argument("--manifest", default="web/data/manifest.json")
     parser.add_argument("--telegram", action="store_true", help="连 Telegram 验证 session 与频道可读")
-    parser.add_argument("--r2", action="store_true", help="连 R2 验证读写与删除权限")
+    parser.add_argument("--storage", "--r2", dest="storage", action="store_true",
+                        help="连存储后端验证（github release 或 R2 读写权限）")
     args = parser.parse_args(argv)
 
     checks = Checks()
@@ -181,8 +213,8 @@ def main(argv: list[str] | None = None) -> int:
     check_manifest(checks, Path(args.manifest), state)
 
     if settings is not None:
-        if args.r2:
-            check_r2(checks, settings)
+        if args.storage:
+            check_storage(checks, settings)
         if args.telegram:
             asyncio.run(check_telegram(checks, settings))
 

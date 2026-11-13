@@ -36,12 +36,31 @@ cron → collect.yml → collector/main.py
 | `collector/archive.py` | zip 安全解压（挡目录穿越/符号链接/zip bomb） |
 | `collector/downloader.py` | 大小预检、`.tmp_` 下载、sha256、原子改名 |
 | `collector/storage_r2.py` | R2 上传、直链、幂等头检查、批量删除 |
+| `collector/storage_github.py` | GitHub Release 资产上传（不绑卡），固定 tag 只留最新一份 |
 | `collector/notifier.py` | 可选 Bot 通知，失败只记日志 |
 | `scripts/login.py` | 本地一次性生成 `TG_SESSION_STRING` |
 | `scripts/build_manifest.py` | state → 前端 manifest，内容不变则不写文件 |
 | `scripts/verify.py` | 离线自检；`--telegram` / `--r2` 做真实探测 |
 | `panel/` | 本地控制台后端（FastAPI）：账号登录、频道与关键词、触发采集、运行记录与日志 |
 | `web/` | 前端控制台（概览/文件库/频道/账号/日志）；无后端时自动降为静态只读 |
+
+## 存储后端（二选一）
+
+`config/settings.yaml` 里 `storage.backend` 决定文件存哪，两种都实现了、随时可切：
+
+| backend | 依赖 | 直链 | 适合 |
+| --- | --- | --- | --- |
+| `github`（默认） | Actions 内置 `GITHUB_TOKEN`，不绑卡 | `https://github.com/<owner>/<repo>/releases/download/latest/<文件名>` | 想零成本、零支付信息 |
+| `r2` | Cloudflare R2 的 4 个凭据 + `R2_PUBLIC_BASE` | `https://pub-xxx.r2.dev/files/<频道>/<sha12>/<文件名>` | 想要更快的下载速度、自定义域名 |
+
+`github` 后端的行为：
+
+- 文件上传到 tag = `latest` 的 Release，**固定直链永远指向最新那份**（换版本后同一 URL 立刻生效）
+- `github_prune_assets: true` 时每次上传前清掉旧资产，Release 里只留最新文件
+- 状态文件走 Contents API 存到仓库的 `state/state.json`，内容没变不会产生新提交
+- 不需要配置任何新密钥：workflow 已注入 `GITHUB_TOKEN` 与 `GITHUB_REPOSITORY`
+
+切到 R2 只需要：填好 4 个 R2 凭据 + `R2_PUBLIC_BASE`，然后把 `backend` 改成 `r2`（或用环境变量 `STORAGE_BACKEND=r2` 覆盖）。
 
 ## 本地面板（可选）
 
@@ -64,10 +83,10 @@ python -m panel            # 默认 http://127.0.0.1:8787
 > 本目录就是仓库根目录：`.github/workflows/` 必须直接在仓库根下，否则 GitHub 不会注册这些工作流。
 
 1. 本地 `pip install -r collector/requirements.txt`，`python scripts/login.py` 生成 session。登录成功后三项凭据会写进项目根 `.env`（`collector` 和 `scripts` 启动时自动读取，已存在的环境变量优先，所以 Actions 里的 Secrets 不会被覆盖）。
-2. 仓库 Secrets 配置：`TG_API_ID`、`TG_API_HASH`、`TG_SESSION_STRING`、`R2_ACCOUNT_ID`、`R2_ACCESS_KEY_ID`、`R2_SECRET_ACCESS_KEY`、`R2_BUCKET`、`R2_PUBLIC_BASE`，通知可选 `BOT_TOKEN`、`BOT_CHAT_ID`。
+2. 仓库 Secrets：`TG_API_ID`、`TG_API_HASH`、`TG_SESSION_STRING` 必需；用 R2 时再加 `R2_ACCOUNT_ID`、`R2_ACCESS_KEY_ID`、`R2_SECRET_ACCESS_KEY`、`R2_BUCKET`、`R2_PUBLIC_BASE`（用默认的 github 后端则不需要）；通知可选 `BOT_TOKEN`、`BOT_CHAT_ID`。
 3. 填 `config/channels.yaml`（频道 username 或数字 id），需要时改 `config/settings.yaml`。
 4. 设置 → Pages → Source 选 GitHub Actions。
-5. 先 `python -m collector.main --config config/ --dry-run --limit 3` 验证文件名提取；再跑 `python scripts/verify.py --telegram --r2`。
+5. 先 `python -m collector.main --config config/ --dry-run --limit 3` 验证文件名提取；再跑 `python scripts/verify.py --telegram --storage`。
 
 ## 运维要点
 

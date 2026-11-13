@@ -10,8 +10,9 @@ from typing import Any, Sequence
 from . import config, notifier, poller
 from .archive import ArchiveError, extract_zip
 from .downloader import DownloadResult, SkipFile, download_file, sha256_file
-from .models import Channel, FileRecord, Settings
+from .models import Channel, FileRecord, Settings, StorageSettings
 from .naming import extension, extract_name, sanitize_name
+from .storage_github import GitHubStorage, GitHubStorageError
 from .storage_r2 import R2Error, R2Storage
 from .store import ACCOUNT_KEY, Store, StoreError
 from .telegram_client import FloodWaitAbort, TelegramError, TgClient
@@ -51,7 +52,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     except config.ConfigError as exc:
         log.error("配置错误：%s", exc)
         return 2
-    storage = R2Storage(settings.storage)
+    storage = build_storage(settings.storage)
     store = Store(settings.collect.state_path, backend=storage if storage.configured else None)
     store.load()
 
@@ -63,7 +64,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     except KeyboardInterrupt:
         log.warning("已中断")
         return 130
-    except (TelegramError, R2Error, StoreError) as exc:
+    except (TelegramError, R2Error, GitHubStorageError, StoreError) as exc:
         log.error("%s", exc)
         return 1
     finally:
@@ -75,7 +76,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     return 0
 
 
-def prune(settings: Settings, store: Store, storage: R2Storage) -> int:
+def build_storage(storage_settings: StorageSettings) -> Any:
+    if storage_settings.backend == "github":
+        return GitHubStorage(storage_settings)
+    return R2Storage(storage_settings)
+
+
+def prune(settings: Settings, store: Store, storage: Any) -> int:
     expired = store.prune(settings.collect.retention_days)
     keys = [str(record.get("key")) for record in expired if record.get("key")]
     deleted = storage.delete_keys(keys) if keys and storage.configured else 0
@@ -85,7 +92,7 @@ def prune(settings: Settings, store: Store, storage: R2Storage) -> int:
     return len(expired)
 
 
-async def collect(settings: Settings, store: Store, storage: R2Storage, args: Any) -> None:
+async def collect(settings: Settings, store: Store, storage: Any, args: Any) -> None:
     tg = TgClient(
         settings.telegram,
         on_flood_wait=lambda seconds: store.set_cooldown(ACCOUNT_KEY, seconds),
@@ -116,7 +123,7 @@ async def collect(settings: Settings, store: Store, storage: R2Storage, args: An
 async def handle_channel(
     tg: TgClient,
     store: Store,
-    storage: R2Storage,
+    storage: Any,
     settings: Settings,
     channel: Channel,
     args: Any,
@@ -150,7 +157,7 @@ async def handle_channel(
 async def handle_latest(
     tg: TgClient,
     store: Store,
-    storage: R2Storage,
+    storage: Any,
     settings: Settings,
     channel: Channel,
     args: Any,
@@ -179,7 +186,7 @@ async def handle_latest(
 async def process_message(
     tg: TgClient,
     store: Store,
-    storage: R2Storage,
+    storage: Any,
     settings: Settings,
     channel: Channel,
     message: Any,
@@ -268,7 +275,7 @@ def record_failure(store: Store, message: Any, channel: Channel, name: str, reas
 
 
 def upload_zip_parts(
-    storage: R2Storage, channel: Channel, archive_sha: str, archive_path: Path, work_dir: str
+    storage: Any, channel: Channel, archive_sha: str, archive_path: Path, work_dir: str
 ) -> list[dict[str, Any]]:
     extract_dir = Path(work_dir) / f".x_{archive_sha[:12]}"
     try:

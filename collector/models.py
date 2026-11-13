@@ -42,6 +42,7 @@ class TelegramSettings:
 
 @dataclass
 class StorageSettings:
+    backend: str = "r2"
     account_id: str = ""
     access_key_id: str = ""
     secret_access_key: str = ""
@@ -51,6 +52,10 @@ class StorageSettings:
     state_key: str = "state/state.json"
     key_prefix: str = ""
     endpoint: str = ""
+    github_repo: str = ""
+    github_token: str = ""
+    github_tag: str = "latest"
+    github_prune_assets: bool = True
 
     @property
     def configured(self) -> bool:

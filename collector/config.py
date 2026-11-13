@@ -107,6 +107,7 @@ def _apply_env(settings: Settings) -> None:
     tg.notify_chat_id = _env("BOT_CHAT_ID", tg.notify_chat_id)
 
     st = settings.storage
+    st.backend = _env("STORAGE_BACKEND", st.backend).lower() or "r2"
     st.account_id = _env("R2_ACCOUNT_ID", st.account_id)
     st.access_key_id = _env("R2_ACCESS_KEY_ID", st.access_key_id)
     st.secret_access_key = _env("R2_SECRET_ACCESS_KEY", st.secret_access_key)
@@ -115,6 +116,9 @@ def _apply_env(settings: Settings) -> None:
     st.state_bucket = _env("R2_STATE_BUCKET", st.state_bucket)
     st.state_key = _env("R2_STATE_KEY", st.state_key)
     st.key_prefix = _env("R2_KEY_PREFIX", st.key_prefix)
+    st.github_repo = _env("GITHUB_REPOSITORY", st.github_repo) or _env("GITHUB_REPO", st.github_repo)
+    st.github_token = _env("GITHUB_TOKEN", st.github_token) or _env("GH_TOKEN", st.github_token)
+    st.github_tag = _env("GITHUB_TAG", st.github_tag)
 
 
 def _build_channels(raw: dict[str, Any]) -> list[Channel]:
@@ -168,13 +172,22 @@ def validate(
         if tg.rate_limit < 0:
             raise ConfigError("telegram.rate_limit 不能为负")
 
-    if require_storage and not settings.storage.configured:
+    if settings.storage.backend not in {"r2", "github"}:
+        raise ConfigError("storage.backend 只能是 r2 或 github")
+
+    if require_storage and settings.storage.backend == "r2" and not settings.storage.configured:
         raise ConfigError(
             "R2 配置不完整：需要 R2_ACCOUNT_ID / R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY / R2_BUCKET"
         )
 
-    if require_public_url and not settings.storage.public_base:
+    if require_public_url and settings.storage.backend == "r2" and not settings.storage.public_base:
         raise ConfigError("缺少 R2_PUBLIC_BASE：没有它无法生成下载直链，采集会在下载完才失败")
+
+    if require_storage and settings.storage.backend == "github":
+        if not settings.storage.github_repo:
+            raise ConfigError("GitHub 存储需要仓库名：设 GITHUB_REPOSITORY=<owner>/<repo>")
+        if not settings.storage.github_token:
+            raise ConfigError("GitHub 存储需要 GITHUB_TOKEN（Actions 里用 secrets.GITHUB_TOKEN）")
 
 
 def load(

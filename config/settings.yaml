@@ -1,4 +1,4 @@
-# 非敏感配置；api_id / api_hash / session / R2 凭据一律走环境变量或 GitHub Secrets
+# 非敏感配置；api_id / api_hash / session / 存储凭据一律走环境变量或 GitHub Secrets
 telegram:
   api_id: 0
   api_hash: ""
@@ -8,9 +8,16 @@ telegram:
   notify_chat_id: ""     # 可选：接收新文件通知的 chat id
 
 storage:
+  # github = 文件放 GitHub Release（不绑卡、Actions 内置 token 就能传）
+  # r2     = 文件放 Cloudflare R2（需要 R2_PUBLIC_BASE 与 4 个 R2 凭据）
+  backend: "github"
   state_key: "state/state.json"
   key_prefix: "files"
-  public_base: ""        # 例如 https://pub-xxxxxxxx.r2.dev
+  public_base: ""        # 仅 r2 需要，例如 https://pub-xxxxxxxx.r2.dev
+
+  # 仅 github 后端使用
+  github_tag: "latest"        # 固定 tag，直链形如 .../releases/download/latest/<文件名>
+  github_prune_assets: true   # 每次上传前清掉同 tag 下的旧资产，保证只有最新一份
 
 collect:
   min_size: 1024
