@@ -1,5 +1,6 @@
 <?php
 require __DIR__ . '/lib.php';
+vh_maybe_dispatch();
 $cfg  = vh_config();
 $data = vh_latest();
 $item = $data['items'][0] ?? null;

@@ -71,6 +71,7 @@ cron → collect.yml → collector/main.py
 - 人看：`https://<域名>/`（显示当前最新文件名、大小、时间，带下载按钮）
 - 脚本：`https://<域名>/latest.php`（302 到最新 Release 资产，`curl -L` 直接下）
 - 触发：`https://<域名>/trigger.php?k=<密钥>`（让 Actions 立刻检查一次更新）
+- **懒触发**：`latest.php` / `index.php` 被访问时会按 25 分钟节流顺手触发一次采集，所以只要有人/脚本下载，数据就不会超过 30 分钟旧——不需要外部定时器
 
 部署与运维（令牌来自面板「账号设置 → AI 部署助手」）：
 
@@ -79,6 +80,9 @@ export MIYO_TOKEN='miyo_dep_xxx'
 python vhost/deploy.py init --keep-remote   # 生成 config.php（复用远端已有密钥）
 python vhost/deploy.py deploy               # 上传 index/lib/latest/trigger/config/index.html
 python vhost/deploy.py ls /                  # 列远端文件
+
+# 面板域名解析不出来时（DNS 偶发 NXDOMAIN），固定 IP 直连：
+python vhost/deploy.py --api-ip 154.12.63.109 deploy
 ```
 
 ### 让它每 30 分钟准点触发

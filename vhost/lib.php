@@ -82,3 +82,30 @@ function vh_trigger(): array {
     @file_put_contents(__DIR__ . '/.last-trigger', date('c'));
     return ['ok' => $res['ok'], 'code' => $res['code'], 'error' => $res['error']];
 }
+
+/**
+ * 懒触发：距上次触发超过 $min_interval 秒就顺手让 GitHub 跑一次采集。
+ * 用文件锁避免并发访问时重复触发；失败不影响页面本身。
+ */
+function vh_maybe_dispatch(int $min_interval = 1500): bool {
+    $cfg = vh_config();
+    if (empty($cfg['token'])) { return false; }
+
+    $lockPath  = __DIR__ . '/.dispatch.lock';
+    $stampPath = __DIR__ . '/.last-dispatch';
+    $fh = @fopen($lockPath, 'c+');
+    if (!$fh) { return false; }
+    if (!flock($fh, LOCK_EX | LOCK_NB)) { fclose($fh); return false; }
+
+    try {
+        $last = is_file($stampPath) ? (int) file_get_contents($stampPath) : 0;
+        if (time() - $last < $min_interval) { return false; }
+        // 先落时间戳，避免慢请求期间其它请求重复触发
+        @file_put_contents($stampPath, (string) time());
+        $result = vh_trigger();
+        return (bool) ($result['ok'] ?? false);
+    } finally {
+        flock($fh, LOCK_UN);
+        fclose($fh);
+    }
+}

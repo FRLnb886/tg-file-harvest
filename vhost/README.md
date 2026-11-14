@@ -59,20 +59,26 @@ return [
 
 ## 触发方式
 
-主机没有定时任务，所以「每 30 分钟检查一次」需要外部定时器打这个地址：
+### 30 分钟新鲜度：懒触发（默认开启）
 
-```
-https://<临时域名>/trigger.php?k=<trigger_secret>
-```
+入口页自己会按 30 分钟节流触发一次采集，**不需要任何外部定时器**：
 
-### cron-job.org 配置（免费，约 1 分钟）
+- 每次访问 `latest.php` 或 `index.php` 时，若距上次触发超过 25 分钟（`vh_maybe_dispatch(1500)`），就顺手调一次 GitHub dispatch
+- 用文件锁（`.dispatch.lock`）避免并发访问重复触发；`.last-dispatch` 记录上次触发时间
+- 触发失败或 token 未填时**不影响页面本身**，只是这一轮不刷新
+
+因此：**任何一次下载请求都保证拿到最多 30 分钟旧的数据**。如果你的下载脚本会定时拉 `latest.php`，就等于有了一个 30 分钟的定时器。
+
+### 也可以交给外部定时器（可选）
+
+想完全不管访问、由系统准点触发，就用 cron-job.org 之类打 `trigger.php`：
 
 | 项 | 填什么 |
 | --- | --- |
 | URL | `https://<临时域名>/trigger.php?k=<trigger_secret>` |
 | 请求方法 | `GET` |
 | 时区 | `Asia/Shanghai` |
-| 计划 | `*/30 * * * *`（每 30 分钟） |
+| 计划 | `*/30 * * * *` |
 
 返回码含义：
 
@@ -80,11 +86,22 @@ https://<临时域名>/trigger.php?k=<trigger_secret>
 | --- | --- |
 | `{"ok":true,"code":204}` | 已提交给 GitHub，几十秒后 Actions 里能看到运行 |
 | `403 forbidden` | `k` 与 `config.php` 的 `trigger_secret` 不一致 |
-| `502 config.php 里的 token 还没填` | token 为空或已过期，需要更新 `config.php` |
+| `502 config.php 里的 token 还没填` | token 为空或已过期 |
 
 好处：GitHub token 只留在主机，不暴露给定时服务。
 
-> 另一条路是让 cron-job.org 直接打 GitHub API（`POST https://api.github.com/repos/<owner>/<repo>/actions/workflows/collect.yml/dispatches`，body `{"ref":"main"}`，头部带 `Authorization: Bearer <token>`），少一跳，但 token 要存在第三方。
+> 另一条路是让定时服务直接打 GitHub API（`POST https://api.github.com/repos/<owner>/<repo>/actions/workflows/collect.yml/dispatches`，body `{"ref":"main"}`，头带 `Authorization: Bearer <token>`），少一跳，但 token 要存在第三方。
+
+## 面板域名解析不出来时
+
+`vhost.miyohost.cn` 的 DNS 偶尔会返回 NXDOMAIN（服务本身仍在原 IP 上跑）。这时给部署脚本指定 IP：
+
+```bash
+python vhost/deploy.py --api-ip 154.12.63.109 deploy
+# 或：export MIYO_API_IP=154.12.63.109
+```
+
+脚本用 `curl --resolve` 固定 IP，同时保留 SNI 与证书校验。
 
 ## 能力边界（实测于 vh-lite 套餐）
 

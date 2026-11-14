@@ -1,5 +1,6 @@
 <?php
 require __DIR__ . '/lib.php';
+vh_maybe_dispatch();   // 顺手保证数据不超过 30 分钟旧（失败不影响跳转）
 $data = vh_latest(!empty($_GET['refresh']));
 if (empty($data['items'][0]['url'])) {
     http_response_code(503);

@@ -8,24 +8,30 @@
     python vhost/deploy.py read /config.php         # 读远端文件
     python vhost/deploy.py rm /probe.php            # 删远端文件
 
+域名解析不出来时（面板 DNS 偶尔抽风），用 `--api-ip` 指定 IP 直连：
+    python vhost/deploy.py --api-ip 154.12.63.109 deploy
+
 令牌在面板「账号设置 → AI 部署助手」生成，只显示一次；不要提交进仓库。
 """
 from __future__ import annotations
 
 import argparse
+import http.client
 import json
 import os
 import re
 import secrets
+import subprocess
 import sys
-import urllib.error
-import urllib.request
+import urllib.parse
 from pathlib import Path
 
-API = "https://vhost.miyohost.cn"
+API_HOST = "vhost.miyohost.cn"
+API = "https://" + API_HOST
+API_IP = ""
+
 HERE = Path(__file__).resolve().parent
 UPLOAD_FILES = ["index.php", "lib.php", "latest.php", "trigger.php", "config.php", "index.html"]
-SKIP_FILES = {"config.example.php", "deploy.py", "README.md"}
 
 
 def token_from(args: argparse.Namespace) -> str:
@@ -36,19 +42,36 @@ def token_from(args: argparse.Namespace) -> str:
 
 
 def call(token: str, method: str, path: str, body: dict | None = None) -> tuple[int, dict]:
-    data = json.dumps(body).encode() if body is not None else None
-    request = urllib.request.Request(API + path, data=data, method=method)
-    request.add_header("Authorization", "Bearer " + token)
-    request.add_header("Content-Type", "application/json")
+    """用 curl 发请求（支持 --resolve 按 IP 直连，绕开 DNS 故障）。"""
+    command = [
+        "curl", "-sS", "--max-time", "40", "-X", method,
+        "-H", "Authorization: Bearer " + token,
+        "-H", "Content-Type: application/json",
+        "-w", "\n%{http_code}",
+    ]
+    if API_IP:
+        command += ["--resolve", f"{API_HOST}:443:{API_IP}"]
+    if body is not None:
+        command += ["--data-binary", json.dumps(body)]
+    command.append(API + path)
+
     try:
-        with urllib.request.urlopen(request, timeout=30) as response:
-            return response.status, json.loads(response.read() or b"{}")
-    except urllib.error.HTTPError as exc:
-        raw = exc.read().decode("utf-8", "replace")
-        try:
-            return exc.code, json.loads(raw)
-        except json.JSONDecodeError:
-            return exc.code, {"error": raw[:300]}
+        result = subprocess.run(command, capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return 0, {"error": f"请求失败：{exc}"}
+
+    raw = result.stdout
+    status = 0
+    if "\n" in raw:
+        raw, _, tail = raw.rpartition("\n")
+        status = int(tail.strip()) if tail.strip().isdigit() else 0
+    if status == 0 and result.stderr:
+        return 0, {"error": result.stderr.strip()[:200]}
+    try:
+        payload = json.loads(raw or "{}")
+    except json.JSONDecodeError:
+        payload = {"error": raw[:300]}
+    return status, payload
 
 
 def cmd_init(args: argparse.Namespace) -> int:
@@ -73,7 +96,7 @@ def cmd_init(args: argparse.Namespace) -> int:
                 github_token = found_token.group(1)
             print("已复用远端 config.php 的 trigger_secret / token")
         else:
-            print("远端还没有 config.php，生成新的")
+            print(f"远端还没有 config.php（{status}），生成新的")
 
     content = template.replace("CHANGE_ME_RANDOM_SECRET", secret)
     content = re.sub(r"'token'\s*=>\s*'[^']*'", f"'token'          => '{github_token}'", content)
@@ -99,7 +122,7 @@ def cmd_deploy(args: argparse.Namespace) -> int:
     for name in files:
         content = (HERE / name).read_text("utf-8")
         if args.dry_run:
-            print(f"[dry-run] 将上传 /{name}（{len(content)} 字节）")
+            print(f"[dry-run] 将上传 /{name}（{len(content)} 字符）")
             continue
         status, body = call(token, "POST", "/api/deploy/files/write", {"path": f"/{name}", "content": content})
         ok = status == 200 and body.get("ok")
@@ -112,13 +135,15 @@ def cmd_deploy(args: argparse.Namespace) -> int:
         host = me.get("host", {})
         print(f"\n访问地址：{host.get('temp_url') or host.get('temp_domain')}")
         print(f"环境：{host.get('runtime')}｜套餐：{host.get('plan_name')}｜磁盘：{host.get('disk_used')}/{host.get('disk_mb')} MB")
+    else:
+        print(f"\n读取主机信息失败：{status} {json.dumps(me, ensure_ascii=False)[:160]}")
     return 0
 
 
 def cmd_ls(args: argparse.Namespace) -> int:
     token = token_from(args)
     path = args.path or "/"
-    status, body = call(token, "GET", "/api/deploy/files?path=" + urllib.request.quote(path))
+    status, body = call(token, "GET", "/api/deploy/files?path=" + urllib.parse.quote(path))
     if status != 200:
         print(status, body)
         return 1
@@ -145,8 +170,11 @@ def cmd_rm(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    global API_IP
+
     parser = argparse.ArgumentParser(description="部署 PHP 入口页到 Miyo 虚拟主机")
     parser.add_argument("--token", default="", help="部署令牌（默认读环境变量 MIYO_TOKEN）")
+    parser.add_argument("--api-ip", default="", help="面板域名解析不出时，指定 IP 直连（也可用 MIYO_API_IP）")
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_init = sub.add_parser("init", help="生成本地 config.php")
@@ -171,6 +199,7 @@ def main(argv: list[str] | None = None) -> int:
     p_rm.set_defaults(func=cmd_rm)
 
     args = parser.parse_args(argv)
+    API_IP = (args.api_ip or os.getenv("MIYO_API_IP", "")).strip()
     return args.func(args)
 
 
