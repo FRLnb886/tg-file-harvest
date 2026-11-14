@@ -23,7 +23,7 @@ cron → collect.yml → collector/main.py
 
 | 路径 | 职责 |
 | --- | --- |
-| `.github/workflows/collect.yml` | 每 30 分钟采集一轮，串行、10 分钟超时、可回写 manifest |
+| `.github/workflows/collect.yml` | 每 10 分钟尝试一次（距上次成功不足 25 分钟则跳过，实际约 30 分钟一轮），串行、10 分钟超时、可回写 manifest |
 | `.github/workflows/prune.yml` | 每周按 `retention_days` 清理过期记录与 R2 对象 |
 | `.github/workflows/web-deploy.yml` | 把 `web/` 发布到 GitHub Pages；定时任务用 `GITHUB_TOKEN` 提交触发不了 push，所以额外挂 `workflow_run`，且只在 manifest 真变了时部署 |
 | `collector/main.py` | 编排：单频道异常隔离、逐频道落盘状态 |
@@ -81,6 +81,23 @@ python vhost/deploy.py deploy               # 上传 index/lib/latest/trigger/co
 python vhost/deploy.py ls /                  # 列远端文件
 ```
 
+### 让它每 30 分钟准点触发
+
+主机本身没有定时任务，用任意免费定时服务打这个地址即可（推荐 cron-job.org，免费、支持时区与 POST/GET）：
+
+```
+URL     https://<临时域名>/trigger.php?k=<trigger_secret>
+方法    GET
+时区    Asia/Shanghai
+计划    */30 * * * *
+```
+
+配置要点：
+
+- 成功返回 `{"ok":true,"code":204}`；`403` 说明 `k` 不对；`502` 说明 `config.php` 里的 GitHub token 没填或过期
+- 这样 GitHub token 只留在主机，不暴露给定时服务
+- 也可以用 cron-job.org 直接打 GitHub API（`POST .../dispatches`，body `{"ref":"main"}`，带 `Authorization: Bearer <token>`），但那样 token 会存在第三方
+
 细节见 [vhost/README.md](vhost/README.md)。注意：`vh-lite` 这类入门套餐只有 PHP、没有命令执行与定时任务，**不能跑采集本身**；它只负责「稳定入口 + 手动触发」，采集仍在 GitHub Actions。
 
 ## 本地面板（可选）
@@ -121,5 +138,6 @@ python -m panel            # 默认 http://127.0.0.1:8787
 - 每处理 50 条消息落盘一次状态，首次跑大频道被 Actions 10 分钟超时杀掉后，下一轮能接着游标继续，不用从头再来。
 - 公开桶意味着「谁有链接谁下」：靠不可枚举的 key、`noindex`、必要时 Cloudflare Access 或签名 URL 控制。
 - session 泄露等同账号被接管；最稳的做法是采集跑在自有机器，Actions 只负责构建前端。
-- **GitHub 的 schedule 不准时**：实测配置 `*/30` 时实际间隔 4~6 小时（官方也说明可能延迟甚至丢调度）。要准时拿最新版，用外部定时器（cron-job.org 等）定时 POST `workflow_dispatch`，或改成本机 cron 跑 `python -m collector.main`。
+- **GitHub 的 schedule 不准时**：实测配置 `*/30` 时实际间隔 4~6 小时（官方说明可能延迟甚至丢调度）。现在的做法是 cron 用 `*/10` 提高被调度到的概率，并在 `gate` 作业里节流：距上次成功运行不足 25 分钟就跳过，因此真正采集仍约 30 分钟一次、Telegram 请求量不变。
+- 要**严格准点**（例如整点、整半点），需要外部定时器打你自己的入口页（见下一节「虚拟主机入口页」），或用本机 cron 跑 `python -m collector.main`。
 - `latest_only` 频道会清理旧记录：只保留最新一条，旧直链随之 404；固定入口请用 manifest。

@@ -59,13 +59,32 @@ return [
 
 ## 触发方式
 
-主机没有定时任务，所以「每 30 分钟检查一次」需要外部定时器（如 cron-job.org）打这个地址：
+主机没有定时任务，所以「每 30 分钟检查一次」需要外部定时器打这个地址：
 
 ```
 https://<临时域名>/trigger.php?k=<trigger_secret>
 ```
 
+### cron-job.org 配置（免费，约 1 分钟）
+
+| 项 | 填什么 |
+| --- | --- |
+| URL | `https://<临时域名>/trigger.php?k=<trigger_secret>` |
+| 请求方法 | `GET` |
+| 时区 | `Asia/Shanghai` |
+| 计划 | `*/30 * * * *`（每 30 分钟） |
+
+返回码含义：
+
+| 返回 | 含义 |
+| --- | --- |
+| `{"ok":true,"code":204}` | 已提交给 GitHub，几十秒后 Actions 里能看到运行 |
+| `403 forbidden` | `k` 与 `config.php` 的 `trigger_secret` 不一致 |
+| `502 config.php 里的 token 还没填` | token 为空或已过期，需要更新 `config.php` |
+
 好处：GitHub token 只留在主机，不暴露给定时服务。
+
+> 另一条路是让 cron-job.org 直接打 GitHub API（`POST https://api.github.com/repos/<owner>/<repo>/actions/workflows/collect.yml/dispatches`，body `{"ref":"main"}`，头部带 `Authorization: Bearer <token>`），少一跳，但 token 要存在第三方。
 
 ## 能力边界（实测于 vh-lite 套餐）
 

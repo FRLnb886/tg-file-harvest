@@ -2,7 +2,7 @@ name: collect
 
 on:
   schedule:
-    - cron: "*/30 * * * *"
+    - cron: "*/10 * * * *"
   workflow_dispatch:
 
 concurrency:
@@ -13,7 +13,43 @@ permissions:
   contents: write
 
 jobs:
+  gate:
+    # GitHub 的 schedule 不可靠（实测 */30 会拖到 4~6 小时），
+    # 所以每 10 分钟尝试一次，但距上次成功运行不足 25 分钟就跳过，实际仍是约 30 分钟一次
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+    outputs:
+      go: ${{ steps.gate.outputs.go }}
+    steps:
+      - id: gate
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "go=true" >> "$GITHUB_OUTPUT"
+            echo "手动触发，直接执行"
+            exit 0
+          fi
+          last=$(gh api "repos/${{ github.repository }}/actions/workflows/collect.yml/runs?per_page=30" \
+                  --jq '[.workflow_runs[] | select(.conclusion=="success")][0].created_at // empty' 2>/dev/null || true)
+          if [ -z "$last" ]; then
+            echo "go=true" >> "$GITHUB_OUTPUT"
+            echo "没有历史成功运行，直接执行"
+            exit 0
+          fi
+          minutes=$(( ( $(date +%s) - $(date -d "$last" +%s) ) / 60 ))
+          echo "距上次成功运行 ${minutes} 分钟"
+          if [ "$minutes" -lt 25 ]; then
+            echo "go=false" >> "$GITHUB_OUTPUT"
+            echo "未满 25 分钟，本轮跳过"
+          else
+            echo "go=true" >> "$GITHUB_OUTPUT"
+          fi
+
   collect:
+    needs: gate
+    if: needs.gate.outputs.go == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
