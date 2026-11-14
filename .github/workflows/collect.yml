@@ -38,7 +38,13 @@ jobs:
             echo "没有历史成功运行，直接执行"
             exit 0
           fi
-          minutes=$(( ( $(date +%s) - $(date -d "$last" +%s) ) / 60 ))
+          last_ts=$(date -d "$last" +%s 2>/dev/null || echo 0)
+          now_ts=$(date +%s)
+          if [ "$last_ts" -eq 0 ]; then
+            minutes=9999
+          else
+            minutes=$(( (now_ts - last_ts) / 60 ))
+          fi
           echo "距上次成功运行 ${minutes} 分钟"
           if [ "$minutes" -lt 25 ]; then
             echo "go=false" >> "$GITHUB_OUTPUT"
