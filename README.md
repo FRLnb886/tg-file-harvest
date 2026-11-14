@@ -101,3 +101,5 @@ python -m panel            # 默认 http://127.0.0.1:8787
 - 每处理 50 条消息落盘一次状态，首次跑大频道被 Actions 10 分钟超时杀掉后，下一轮能接着游标继续，不用从头再来。
 - 公开桶意味着「谁有链接谁下」：靠不可枚举的 key、`noindex`、必要时 Cloudflare Access 或签名 URL 控制。
 - session 泄露等同账号被接管；最稳的做法是采集跑在自有机器，Actions 只负责构建前端。
+- **GitHub 的 schedule 不准时**：实测配置 `*/30` 时实际间隔 4~6 小时（官方也说明可能延迟甚至丢调度）。要准时拿最新版，用外部定时器（cron-job.org 等）定时 POST `workflow_dispatch`，或改成本机 cron 跑 `python -m collector.main`。
+- `latest_only` 频道会清理旧记录：只保留最新一条，旧直链随之 404；固定入口请用 manifest。
