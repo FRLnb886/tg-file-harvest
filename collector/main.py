@@ -172,10 +172,14 @@ async def handle_latest(
         if store.should_skip(unique_id):
             known = (store.files.get(unique_id) or {}).get("name", unique_id)
             log.info("最新匹配文件已入库，本轮无需更新：%s", known)
+            if not args.dry_run and drop_older_records(store, storage, channel.id, unique_id):
+                store.save()
             return 0
         outcome = await process_message(tg, store, storage, settings, channel, message, args)
         if outcome in {"ok", "skipped", "duplicate"}:
             store.update_cursor(channel.id, int(message.id))
+        if outcome == "ok" and not args.dry_run:
+            drop_older_records(store, storage, channel.id, unique_id)
         if not args.dry_run:
             store.save()
         return 1 if outcome == "ok" else 0
@@ -299,6 +303,32 @@ def upload_zip_parts(
         return parts
     finally:
         shutil.rmtree(extract_dir, ignore_errors=True)
+
+
+def drop_older_records(store: Store, storage: Any, channel_id: str, keep_unique_id: str) -> int:
+    """latest_only 频道只保留最新一条记录，避免 manifest 里留下资产已被删除的死链。"""
+    stale = [
+        (uid, record)
+        for uid, record in store.files.items()
+        if record.get("channel_id") == channel_id and uid != keep_unique_id
+    ]
+    if not stale:
+        return 0
+    keys: list[str] = []
+    for _uid, record in stale:
+        if record.get("key"):
+            keys.append(str(record["key"]))
+        for part in record.get("parts") or []:
+            if part.get("key"):
+                keys.append(str(part["key"]))
+        store.files.pop(_uid, None)
+    if keys:
+        try:
+            storage.delete_keys(keys)
+        except Exception as exc:  # 资产可能已被释放，删不掉不影响状态清理
+            log.warning("清理旧对象失败（忽略）：%s", exc)
+    log.info("已清理频道 %s 的 %s 条旧记录", channel_id, len(stale))
+    return len(stale)
 
 
 def unique_id_of(message: Any) -> str:
