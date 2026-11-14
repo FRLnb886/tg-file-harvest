@@ -42,6 +42,7 @@ cron → collect.yml → collector/main.py
 | `scripts/build_manifest.py` | state → 前端 manifest，内容不变则不写文件 |
 | `scripts/verify.py` | 离线自检；`--telegram` / `--r2` 做真实探测 |
 | `panel/` | 本地控制台后端（FastAPI）：账号登录、频道与关键词、触发采集、运行记录与日志 |
+| `vhost/` | 虚拟主机（PHP）入口页：固定域名的最新版下载入口 + 触发按钮，附部署脚本 |
 | `web/` | 前端控制台（概览/文件库/频道/账号/日志）；无后端时自动降为静态只读 |
 
 ## 存储后端（二选一）
@@ -62,6 +63,25 @@ cron → collect.yml → collector/main.py
 - **想拿「永远最新」的地址**：读 `https://<owner>.github.io/<repo>/data/manifest.json`，`items[0].url` 就是当前最新文件的直链（静态请求，比轮询 Telegram 便宜得多）
 
 切到 R2 只需要：填好 4 个 R2 凭据 + `R2_PUBLIC_BASE`，然后把 `backend` 改成 `r2`（或用环境变量 `STORAGE_BACKEND=r2` 覆盖）。
+
+## 虚拟主机入口页（可选）
+
+如果有一台 PHP 虚拟主机，可以在上面放一个**固定域名的下载入口**，脚本随时拿到最新文件：
+
+- 人看：`https://<域名>/`（显示当前最新文件名、大小、时间，带下载按钮）
+- 脚本：`https://<域名>/latest.php`（302 到最新 Release 资产，`curl -L` 直接下）
+- 触发：`https://<域名>/trigger.php?k=<密钥>`（让 Actions 立刻检查一次更新）
+
+部署与运维（令牌来自面板「账号设置 → AI 部署助手」）：
+
+```bash
+export MIYO_TOKEN='miyo_dep_xxx'
+python vhost/deploy.py init --keep-remote   # 生成 config.php（复用远端已有密钥）
+python vhost/deploy.py deploy               # 上传 index/lib/latest/trigger/config/index.html
+python vhost/deploy.py ls /                  # 列远端文件
+```
+
+细节见 [vhost/README.md](vhost/README.md)。注意：`vh-lite` 这类入门套餐只有 PHP、没有命令执行与定时任务，**不能跑采集本身**；它只负责「稳定入口 + 手动触发」，采集仍在 GitHub Actions。
 
 ## 本地面板（可选）
 

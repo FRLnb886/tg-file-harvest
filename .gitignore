@@ -8,3 +8,7 @@ __pycache__/
 *.pyo
 .venv/
 .DS_Store
+# 虚拟主机入口页的运行时配置（含 token 与触发密钥）
+vhost/config.php
+vhost/.cache.json
+vhost/.last-trigger
